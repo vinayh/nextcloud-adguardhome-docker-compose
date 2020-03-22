@@ -1,0 +1,118 @@
+version: '3'
+
+services:
+
+  proxy:
+    image: jwilder/nginx-proxy:alpine
+    labels:
+      - "com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy=true"
+    container_name: proxy
+    networks:
+      - nextcloud_network
+      - adguard_network
+    ports:
+      - 80:80
+      - 443:443
+    volumes:
+      - ./proxy/conf.d:/etc/nginx/conf.d:rw
+      - ./proxy/vhost.d:/etc/nginx/vhost.d:rw
+      - ./proxy/html:/usr/share/nginx/html:rw
+      - ./proxy/certs:/etc/nginx/certs:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+    restart: unless-stopped
+    environment:
+      DEFAULT_HOST: YOUR_DNS_DOMAIN
+  
+  letsencrypt:
+    image: jrcs/letsencrypt-nginx-proxy-companion
+    container_name: letsencrypt
+    depends_on:
+      - proxy
+    networks:
+      - nextcloud_network
+      - adguard_network
+    volumes:
+      - ./proxy/certs:/etc/nginx/certs:rw
+      - ./proxy/vhost.d:/etc/nginx/vhost.d:rw
+      - ./proxy/html:/usr/share/nginx/html:rw
+      - /etc/localtime:/etc/localtime:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - LETSENCRYPT_EMAIL=YOUR_EMAIL
+    restart: unless-stopped
+
+  db:
+    image: mariadb
+    container_name: nextcloud-mariadb
+    networks:
+      - nextcloud_network
+    volumes:
+      - db:/var/lib/mysql
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - MYSQL_ROOT_PASSWORD=YOUR_MYSQL_PASSWORD
+      - MYSQL_PASSWORD=YOUR_MYSQL_PASSWORD
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+    restart: unless-stopped
+  
+  nextcloud:
+    image: nextcloud:latest
+    container_name: nextcloud
+    networks:
+      - nextcloud_network
+    depends_on:
+      - letsencrypt
+      - proxy
+      - db
+    volumes:
+      - nextcloud:/var/www/html
+      - ./nextcloud/config:/var/www/html/config
+      - ./nextcloud/custom_apps:/var/www/html/custom_apps
+      - ./nextcloud/data:/var/www/html/data
+      - ./nextcloud/themes:/var/www/html/themes
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - VIRTUAL_HOST=YOUR_NEXTCLOUD_DOMAIN
+      - LETSENCRYPT_HOST=YOUR_NEXTCLOUD_DOMAIN
+    restart: unless-stopped
+
+  adguard:
+    container_name: adguard 
+    domainname: docker
+    hostname: adguard
+    image: adguard/adguardhome:latest
+    networks:
+      - adguard_network
+    depends_on:
+      - letsencrypt
+      - proxy
+    ports:
+      - '53:53/tcp'
+      - '53:53/udp'
+      - '67:67/udp'
+      - '853:853/tcp'
+      - '3000:3000/tcp'
+    restart: unless-stopped
+    volumes:
+      - ./adguard/work:/opt/adguardhome/work
+      - ./adguard/conf:/opt/adguardhome/conf
+      - ./proxy/certs:/opt/adguardhome/certs:ro
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - ServerIP=YOUR_SERVER_IP
+      - PROXY_LOCATION=adguard
+      - VIRTUAL_HOST=YOUR_DNS_DOMAIN
+      - LETSENCRYPT_HOST=YOUR_DNS_DOMAIN
+      - VIRTUAL_PORT=80
+      - TZ=YOUR_TIME_ZONE
+
+volumes:
+  nextcloud:
+  db:
+
+networks:
+  nextcloud_network:
+  adguard_network:
